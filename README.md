@@ -1,8 +1,10 @@
+欢迎关注B站及YouTube频道：深度云创科技，感兴趣的朋友欢迎加入新时代智能体交流社群
+
+客服微信：16773345788
+
 # CodexBridge
 
 CodexBridge is a Codex-centered gateway for connecting multiple chat platforms to one shared Codex engine, while switching backend provider profiles inside Codex when needed.
-
-Maintainer: 深度云创科技 (DeepCloud)
 
 ## Current Direction
 

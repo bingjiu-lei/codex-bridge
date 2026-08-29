@@ -72,7 +72,11 @@ function Resolve-ServiceAppData([string]$ResolvedHomeDir) {
   return Join-Path $ResolvedHomeDir "AppData\Roaming"
 }
 
-$NodeBin = Find-CommandPath @("node.exe", "node")
+$NodeBin = if ($env:CODEXBRIDGE_NODE_BIN -and (Test-Path -LiteralPath $env:CODEXBRIDGE_NODE_BIN)) {
+  (Resolve-Path -LiteralPath $env:CODEXBRIDGE_NODE_BIN).Path
+} else {
+  Find-CommandPath @("node.exe", "node")
+}
 if (-not $NodeBin) {
   throw "node was not found in PATH"
 }
@@ -85,7 +89,11 @@ if (-not $EnvFile) {
   $EnvFile = Join-Path (Resolve-ServiceAppData $HomeDir) "codexbridge\weixin.service.env"
 }
 
-$CodexBin = Find-CommandPath @("codex.exe", "codex.cmd", "codex.bat", "codex")
+$CodexBin = if ($env:CODEXBRIDGE_CODEX_BIN -and (Test-Path -LiteralPath $env:CODEXBRIDGE_CODEX_BIN)) {
+  (Resolve-Path -LiteralPath $env:CODEXBRIDGE_CODEX_BIN).Path
+} else {
+  Find-CommandPath @("codex.exe", "codex.cmd", "codex.bat", "codex")
+}
 $ConfigDir = Split-Path -Parent $EnvFile
 $LogDir = Join-Path $StateDir "logs"
 $StdoutLog = Join-Path $LogDir "weixin-bridge.out.log"

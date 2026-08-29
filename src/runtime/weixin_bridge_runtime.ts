@@ -9,6 +9,7 @@ import type {
   PlatformMediaDeliveryResult,
 } from '../types/platform.js';
 import type { OutputArtifact, ProviderApprovalRequest, ProviderTurnProgress } from '../types/provider.js';
+import type { WeixinWorkflowRouteResolver } from './weixin_workflow_routes.js';
 
 interface DeliveryResult {
   success: boolean;
@@ -139,6 +140,7 @@ interface WeixinBridgeRuntimeOptions {
   automationPollMs?: number;
   internalThreadCleanupMs?: number;
   locale?: string | null;
+  workflowRouteResolver?: WeixinWorkflowRouteResolver | null;
 }
 
 export class WeixinBridgeRuntime {
@@ -194,6 +196,8 @@ export class WeixinBridgeRuntime {
 
   internalThreadCleanupInFlight: Promise<void> | null;
 
+  workflowRouteResolver: WeixinWorkflowRouteResolver | null;
+
   constructor({
     platformPlugin,
     bridgeCoordinator,
@@ -209,6 +213,7 @@ export class WeixinBridgeRuntime {
     automationPollMs = 30_000,
     internalThreadCleanupMs = 24 * 60 * 60 * 1000,
     locale = null,
+    workflowRouteResolver = null,
   }) {
     this.platformPlugin = platformPlugin;
     this.bridgeCoordinator = bridgeCoordinator;
@@ -235,6 +240,7 @@ export class WeixinBridgeRuntime {
     this.automationSweepInFlight = null;
     this.internalThreadCleanupTimer = null;
     this.internalThreadCleanupInFlight = null;
+    this.workflowRouteResolver = workflowRouteResolver;
   }
 
   async start(): Promise<void> {
@@ -279,29 +285,42 @@ export class WeixinBridgeRuntime {
   }
 
   async handleInboundEvent(event: InboundTextEvent): Promise<RuntimeResponse> {
-    if (isLocalKeepalivePulse(event)) {
+    const effectiveEvent = this.workflowRouteResolver?.resolveInboundEvent(event) ?? event;
+    if (isLocalKeepalivePulse(effectiveEvent)) {
       debugRuntime('local_keepalive_pulse_swallowed', {
-        scopeId: event.externalScopeId,
-        textPreview: truncateDebugText(event?.text),
+        scopeId: effectiveEvent.externalScopeId,
+        textPreview: truncateDebugText(effectiveEvent?.text),
       });
       return { type: 'local_noop' };
     }
-    return this.scheduleInboundEvent(event);
+    return this.scheduleInboundEvent(effectiveEvent);
   }
 
   async dispatchInboundEvent(event: InboundTextEvent): Promise<any> {
-    if (isLocalKeepalivePulse(event)) {
+    const workflowCommandResponse = this.workflowRouteResolver?.handleCommand(event) ?? null;
+    if (workflowCommandResponse) {
+      const delivery = await this.sendSystemTextDirect({
+        externalScopeId: event.externalScopeId,
+        content: workflowCommandResponse,
+      });
+      if (!delivery.success) {
+        throw new Error(delivery.error || 'Failed to deliver workflow routing command response.');
+      }
+      return undefined;
+    }
+    const effectiveEvent = this.workflowRouteResolver?.resolveInboundEvent(event) ?? event;
+    if (isLocalKeepalivePulse(effectiveEvent)) {
       debugRuntime('local_keepalive_pulse_swallowed', {
-        scopeId: event.externalScopeId,
-        textPreview: truncateDebugText(event?.text),
+        scopeId: effectiveEvent.externalScopeId,
+        textPreview: truncateDebugText(effectiveEvent?.text),
       });
       return undefined;
     }
-    const command = parseSlashCommand(String(event?.text ?? ''));
+    const command = parseSlashCommand(String(effectiveEvent?.text ?? ''));
     if (command) {
-      await this.flushPendingInboundMerge(event.externalScopeId);
+      await this.flushPendingInboundMerge(effectiveEvent.externalScopeId);
       if (shouldScheduleSlashCommand(command)) {
-        const task = this.processInboundEventWithOptions(event, { deferPostResponseAction: true }).catch(async (error) => {
+        const task = this.processInboundEventWithOptions(effectiveEvent, { deferPostResponseAction: true }).catch(async (error) => {
           await this.onError(error);
           throw error;
         });
@@ -311,11 +330,11 @@ export class WeixinBridgeRuntime {
           completion: task,
         };
       }
-      const response = await this.processInboundEventWithOptions(event, { deferPostResponseAction: true });
-      const afterCommit = this.buildAfterCommitAction(response, event);
+      const response = await this.processInboundEventWithOptions(effectiveEvent, { deferPostResponseAction: true });
+      const afterCommit = this.buildAfterCommitAction(response, effectiveEvent);
       return afterCommit ? { afterCommit } : undefined;
     }
-    const task = this.scheduleInboundEvent(event)
+    const task = this.scheduleInboundEvent(effectiveEvent)
       .catch(async (error) => {
         await this.onError(error);
         throw error;

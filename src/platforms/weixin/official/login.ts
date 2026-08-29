@@ -79,7 +79,10 @@ export async function officialQrLogin(
         qrcode,
       });
     } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
+      const errorCode = error instanceof Error
+        ? (error as NodeJS.ErrnoException).code
+        : undefined;
+      if (error instanceof Error && (error.name === 'AbortError' || errorCode === 'ETIMEDOUT')) {
         await sleep(1000);
         continue;
       }

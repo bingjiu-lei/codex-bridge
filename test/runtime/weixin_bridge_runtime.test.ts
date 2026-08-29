@@ -41,6 +41,7 @@ interface RuntimeHarnessOptions {
   automationPollMs?: number;
   internalThreadCleanupMs?: number;
   pollEvents?: any[];
+  workflowRouteResolver?: any;
 }
 
 function makeRuntime({
@@ -58,6 +59,7 @@ function makeRuntime({
   automationPollMs = 30_000,
   internalThreadCleanupMs = 0,
   pollEvents = null,
+  workflowRouteResolver = null,
 }: RuntimeHarnessOptions) {
   return new WeixinBridgeRuntime({
     platformPlugin: {
@@ -110,6 +112,7 @@ function makeRuntime({
     inboundAttachmentMergeWindowMs,
     automationPollMs,
     internalThreadCleanupMs,
+    workflowRouteResolver,
   });
 }
 
@@ -167,6 +170,39 @@ test('WeixinBridgeRuntime forwards poll events into the bridge coordinator and s
     { externalScopeId: 'wxid_1', status: 'stop' },
   ]);
   assert.deepEqual(committed, ['cursor-1']);
+});
+
+test('WeixinBridgeRuntime applies a workflow quote route before dispatching to Codex', async () => {
+  let received: any = null;
+  const runtime = makeRuntime({
+    sendText: async () => {},
+    workflowRouteResolver: {
+      resolveInboundEvent(event: any) {
+        return {
+          ...event,
+          metadata: {
+            ...event.metadata,
+            codexbridge: { overrideBridgeSessionId: 'workflow-session-a' },
+          },
+        };
+      },
+    },
+    coordinator: {
+      async handleInboundEvent(event: any) {
+        received = event;
+        return completeResponse('已收到');
+      },
+    },
+  });
+
+  await runtime.handleInboundEvent({
+    platform: 'weixin',
+    externalScopeId: 'wxid_1',
+    text: '继续处理',
+    metadata: { weixin: { referenceText: '[#CBWF:abcdefgh_1]' } },
+  });
+
+  assert.equal(received.metadata.codexbridge.overrideBridgeSessionId, 'workflow-session-a');
 });
 
 test('WeixinBridgeRuntime runs internal thread cleanup as a single in-flight task', async () => {

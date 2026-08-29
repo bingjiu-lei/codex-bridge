@@ -89,6 +89,30 @@ test('WeixinPlatformPlugin normalizes inbound DM text and persists context token
   assert.equal(accountStore.getContextToken('bot-account', 'wxid_sender'), 'ctx-1');
 });
 
+test('WeixinPlatformPlugin retains the quoted message text for bridge-owned routing', async () => {
+  const rootDir = makeTempAccountsDir();
+  const accountStore = new WeixinAccountStore({ rootDir });
+  const plugin = makePlugin({
+    accountStore,
+    config: {
+      enabled: true, accountId: 'bot-account', token: 'token', baseUrl: 'https://ilinkai.weixin.qq.com',
+      cdnBaseUrl: 'https://novac2c.cdn.weixin.qq.com/c2c', dmPolicy: 'open', groupPolicy: 'disabled',
+      allowFrom: [], groupAllowFrom: [], stateDir: path.dirname(path.dirname(rootDir)), accountsDir: rootDir, maxMessageLength: 4000,
+    },
+  });
+  const event = await plugin.normalizeInboundEvent({
+    from_user_id: 'wxid_sender', to_user_id: 'bot-account', message_id: 'reply-1',
+    item_list: [{
+      type: 1,
+      text_item: { text: '继续处理这个视频' },
+      ref_msg: { message_item: { type: 1, msg_id: 'notice-1', text_item: { text: '完成通知\n[#CBWF:abcdefgh_1]' } } },
+    }],
+  });
+
+  assert.equal((event?.metadata?.weixin as any).referenceText, '完成通知\n[#CBWF:abcdefgh_1]');
+  assert.equal((event?.metadata?.weixin as any).referenceMessageId, 'notice-1');
+});
+
 test('WeixinPlatformPlugin normalizes inbound group text and persists context token for group scope', async () => {
   const rootDir = makeTempAccountsDir();
   const accountStore = new WeixinAccountStore({ rootDir });

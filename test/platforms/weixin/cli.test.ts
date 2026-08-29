@@ -16,6 +16,7 @@ import {
   parseWeixinClearContextArgs,
   parseWeixinLoginArgs,
   parseWeixinServeArgs,
+  parseWeixinWorkflowNotifyArgs,
   readPendingRestartNotifications,
   resolveEmbeddedCodexNativeApiOptions,
   resolveClearContextAccountId,
@@ -92,6 +93,38 @@ test('parseWeixinClearContextArgs reads state-dir and account-id flags', () => {
 
   assert.equal(parsed.stateDir, '/tmp/codexbridge-state');
   assert.equal(parsed.accountId, 'bot-account');
+});
+
+test('parseWeixinWorkflowNotifyArgs reads a routed terminal workflow notification', () => {
+  assert.deepEqual(parseWeixinWorkflowNotifyArgs([
+    '--state-dir', '/tmp/codexbridge-state',
+    '--to', 'wxid_owner',
+    '--bridge-session', 'session-workflow-a',
+    '--run-id', 'upload-a',
+    '--title', '视频 A',
+  ]), {
+    stateDir: '/tmp/codexbridge-state',
+    externalScopeId: 'wxid_owner',
+    bridgeSessionId: 'session-workflow-a',
+    runId: 'upload-a',
+    title: '视频 A',
+    status: 'succeeded',
+    detail: null,
+  });
+
+  assert.deepEqual(parseWeixinWorkflowNotifyArgs([
+    '--run-id', 'upload-b',
+    '--status', 'failed',
+    '--detail', '上传接口返回错误',
+  ]), {
+    stateDir: null,
+    externalScopeId: null,
+    bridgeSessionId: null,
+    runId: 'upload-b',
+    title: null,
+    status: 'failed',
+    detail: '上传接口返回错误',
+  });
 });
 
 test('parseCodexCleanupInternalThreadsArgs defaults to dry-run and reads apply flags', () => {

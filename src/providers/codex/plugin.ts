@@ -746,6 +746,10 @@ function buildDeveloperInstructions(event: InboundTextEvent): string {
   if (artifactInstructions) {
     parts.push(artifactInstructions);
   }
+  const workflowNotificationInstructions = buildWorkflowNotificationDeveloperInstructions(event);
+  if (workflowNotificationInstructions) {
+    parts.push(workflowNotificationInstructions);
+  }
   const retryInstructions = buildRetryDeveloperInstructions(retryContext);
   if (retryInstructions) {
     parts.push(retryInstructions);
@@ -815,6 +819,53 @@ function resolveDeveloperPromptContext(event: InboundTextEvent): DeveloperPrompt
     subcommand: normalizeDeveloperPromptContextValue(raw.subcommand),
     operation: normalizeDeveloperPromptContextValue(raw.operation),
   };
+}
+
+function buildWorkflowNotificationDeveloperInstructions(event: InboundTextEvent): string {
+  const context = resolveWorkflowNotificationContext(event);
+  if (!context) {
+    return '';
+  }
+  const command = [
+    '& "D:\\dev\\nodejs\\node.exe"',
+    '"D:\\githubPro\\codex-bridge\\node_modules\\tsx\\dist\\cli.mjs"',
+    '"D:\\githubPro\\codex-bridge\\src\\cli.ts"',
+    'weixin workflow-notify',
+    `--to "${escapePowerShellArgument(context.externalScopeId)}"`,
+    `--bridge-session "${escapePowerShellArgument(context.bridgeSessionId)}"`,
+    '--run-id "<bili_upload_status 的 job id>"',
+    '--title "<最终投稿标题>"',
+    '--status "<succeeded 或 failed>"',
+    '--detail "<失败时填写状态返回的简要原因；成功时省略>"',
+  ].join(' ');
+  return [
+    'Bilibili terminal notification:',
+    '- Only when this turn actually runs the Bilibili publishing workflow and bili_upload_status explicitly reports status: succeeded or status: failed, execute the following PowerShell command once. Use the returned upload job id, final title, terminal status, and failure reason when present.',
+    `- ${command}`,
+    '- Do not send this notification for active, timed-out, ambiguous, or cancelled uploads. Do not place this operational instruction in the user-facing response.',
+  ].join('\n');
+}
+
+function resolveWorkflowNotificationContext(event: InboundTextEvent): {
+  externalScopeId: string;
+  bridgeSessionId: string;
+} | null {
+  const codexbridge = event.metadata?.codexbridge;
+  if (!codexbridge || typeof codexbridge !== 'object') {
+    return null;
+  }
+  const context = (codexbridge as Record<string, unknown>).workflowNotificationContext;
+  if (!context || typeof context !== 'object') {
+    return null;
+  }
+  const record = context as Record<string, unknown>;
+  const externalScopeId = typeof record.externalScopeId === 'string' ? record.externalScopeId.trim() : '';
+  const bridgeSessionId = typeof record.bridgeSessionId === 'string' ? record.bridgeSessionId.trim() : '';
+  return externalScopeId && bridgeSessionId ? { externalScopeId, bridgeSessionId } : null;
+}
+
+function escapePowerShellArgument(value: string): string {
+  return String(value ?? '').replace(/"/gu, '`"');
 }
 
 function resolveRetryContext(event: InboundTextEvent): Record<string, unknown> | null {

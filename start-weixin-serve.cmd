@@ -1,8 +1,10 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-set "CODEX_REAL_BIN=C:\Users\cully\AppData\Roaming\npm\codex.cmd"
+nvm use 24.11.1 >nul
+set "CODEX_REAL_BIN=D:\dev\nodejs\node_global\codex.cmd"
 set "CODEX_APP_SERVER_TRANSPORT=stdio"
-set "CODEXBRIDGE_DEFAULT_CWD=D:\cully\Documents"
+set "CODEXBRIDGE_FFMPEG_PATH=D:\bilibili-video\video-tools\ffmpeg.exe"
+set "CODEXBRIDGE_DEFAULT_CWD=D:\codexbridge-workspace"
 set "CODEXBRIDGE_LOCALE=zh-CN"
-npm run weixin:serve -- --cwd "D:\cully\Documents"
+npm run weixin:serve -- --cwd "%CODEXBRIDGE_DEFAULT_CWD%"

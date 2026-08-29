@@ -63,6 +63,8 @@ interface WeixinInboundMetadata extends Record<string, unknown> {
     roomId: string | null;
     chatType: 'group' | 'dm';
     messageId: string | null;
+    referenceText: string | null;
+    referenceMessageId: string | null;
     contextTokenPresent: boolean;
     attachmentCount: number;
     attachmentErrors?: string[];
@@ -193,6 +195,7 @@ export class WeixinPlatformPlugin implements Pick<PlatformPluginContract, 'id' |
       return null;
     }
     const text = extractText(payload.item_list ?? []);
+    const reference = extractReference(payload.item_list ?? []);
     const { attachments, errors: attachmentErrors } = await this.downloadInboundAttachments(payload);
     if (!text && attachments.length === 0 && attachmentErrors.length === 0) {
       debugWeixin('drop_message', {
@@ -230,6 +233,8 @@ export class WeixinPlatformPlugin implements Pick<PlatformPluginContract, 'id' |
           roomId: scope.chatType === 'group' ? scope.externalScopeId : null,
           chatType: scope.chatType,
           messageId: stringValue(payload.message_id),
+          referenceText: reference.text,
+          referenceMessageId: reference.messageId,
           contextTokenPresent: Boolean(contextToken),
           attachmentCount: attachments.length,
           attachmentErrors,
@@ -850,6 +855,22 @@ export function extractText(itemList: MessageItem[]) {
     }
   }
   return '';
+}
+
+export function extractReference(itemList: MessageItem[]): { text: string | null; messageId: string | null } {
+  for (const item of itemList) {
+    const referenced = item?.ref_msg?.message_item;
+    if (!referenced) {
+      continue;
+    }
+    const text = extractText([referenced]);
+    const title = stringValue(item?.ref_msg?.title);
+    return {
+      text: text || title || null,
+      messageId: stringValue(referenced.msg_id),
+    };
+  }
+  return { text: null, messageId: null };
 }
 
 function isMediaItem(item: MessageItem) {

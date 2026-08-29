@@ -18,6 +18,12 @@ import { CodexNativeApiService } from './providers/codex/native_api_service.js';
 import { OpenAINativeProviderPlugin } from './providers/openai_native/plugin.js';
 import { OpenAICompatibleProviderPlugin } from './providers/openai_compatible/plugin.js';
 import { WeixinBridgeRuntime } from './runtime/weixin_bridge_runtime.js';
+import {
+  FileJsonWorkflowNotificationRouteStore,
+  FileJsonWorkflowFocusStore,
+  formatWorkflowRouteMarker,
+  WeixinWorkflowRouteResolver,
+} from './runtime/weixin_workflow_routes.js';
 import { createI18n } from './i18n/index.js';
 
 const CLI_FILE = fileURLToPath(import.meta.url);
@@ -38,6 +44,16 @@ interface WeixinServeArgs {
 interface WeixinClearContextArgs {
   stateDir: string | null;
   accountId: string | null;
+}
+
+interface WeixinWorkflowNotifyArgs {
+  stateDir: string | null;
+  externalScopeId: string | null;
+  bridgeSessionId: string | null;
+  runId: string | null;
+  title: string | null;
+  status: 'succeeded' | 'failed';
+  detail: string | null;
 }
 
 interface CodexCleanupInternalThreadsArgs {
@@ -97,6 +113,9 @@ async function main(argv: string[] = process.argv.slice(2)) {
   }
   if (group === 'weixin' && command === 'clear-context') {
     return runWeixinClearContext(args);
+  }
+  if (group === 'weixin' && command === 'workflow-notify') {
+    return runWeixinWorkflowNotify(args);
   }
   if (group === 'codex' && command === 'cleanup-internal-threads') {
     return runCodexCleanupInternalThreads(args);
@@ -196,6 +215,60 @@ async function runWeixinClearContext(args: string[]) {
   process.stdout.write(`${i18n.t('cli.clearContext.account', { value: accountId })}\n`);
 }
 
+async function runWeixinWorkflowNotify(args: string[]) {
+  const options = parseWeixinWorkflowNotifyArgs(args);
+  const stateDir = path.resolve(options.stateDir ?? defaultCodexBridgeStateDir());
+  const runtimeDir = path.join(stateDir, 'runtime');
+  const repositories = createFileJsonRepositories(runtimeDir);
+  const allBindings = repositories.platformBindings.list().filter((binding) => binding.platform === 'weixin');
+  const externalScopeId = options.externalScopeId
+    ?? (allBindings.length === 1 ? allBindings[0].externalScopeId : null);
+  if (!externalScopeId) {
+    throw new Error('Specify --to <WeChat scope id> when more than one WeChat conversation is bound.');
+  }
+  const binding = repositories.platformBindings.getByScope('weixin', externalScopeId);
+  const bridgeSessionId = options.bridgeSessionId ?? binding?.bridgeSessionId ?? null;
+  if (!bridgeSessionId || !repositories.bridgeSessions.getById(bridgeSessionId)) {
+    throw new Error('Specify a valid --bridge-session <id> for the workflow conversation.');
+  }
+  const runId = String(options.runId ?? '').trim();
+  if (!runId) {
+    throw new Error('Specify --run-id <id>; use one stable id for retries of the same upload.');
+  }
+  const routeStore = new FileJsonWorkflowNotificationRouteStore(path.join(runtimeDir, 'workflow_notification_routes.json'));
+  const route = routeStore.register({
+    externalScopeId,
+    bridgeSessionId,
+    runId,
+    workflow: 'bilibili-video',
+    title: options.title,
+    status: options.status,
+  });
+  const title = String(options.title ?? '视频工作流').trim() || '视频工作流';
+  const detail = String(options.detail ?? '').trim();
+  const content = [
+    options.status === 'failed' ? '【视频工作流失败】' : '【视频工作流已完成】',
+    title,
+    options.status === 'failed' ? '上传状态：失败。' : '上传状态：成功。',
+    ...(detail ? [`原因：${detail}`] : []),
+    '引用回复此通知，会回到对应的工作流对话。',
+    formatWorkflowRouteMarker(route.alias),
+  ].join('\n');
+  const accountStore = new WeixinAccountStore({ rootDir: path.join(stateDir, 'weixin', 'accounts') });
+  const plugin = new WeixinPlatformPlugin({ accountStore });
+  await plugin.start();
+  try {
+    const result = await plugin.sendText({ externalScopeId, content });
+    if (!result?.success) {
+      throw new Error(result?.error || 'WeChat workflow notification was not delivered.');
+    }
+  } finally {
+    await plugin.stop();
+  }
+  process.stdout.write(`workflow_notification_sent: ${runId} (${options.status})\n`);
+  process.stdout.write(`route_alias: ${route.alias}\n`);
+}
+
 async function runWeixinServe(args: string[]) {
   const i18n = createI18n();
   const options = parseWeixinServeArgs(args);
@@ -237,6 +310,10 @@ async function runWeixinServe(args: string[]) {
     automationJobs: runtime.services.automationJobs,
     agentJobs: runtime.services.agentJobs,
     assistantRecords: runtime.services.assistantRecords,
+    workflowRouteResolver: new WeixinWorkflowRouteResolver({
+      routeStore: new FileJsonWorkflowNotificationRouteStore(path.join(stateDir, 'runtime', 'workflow_notification_routes.json')),
+      focusStore: new FileJsonWorkflowFocusStore(path.join(stateDir, 'runtime', 'workflow_notification_focus.json')),
+    }),
     onError: (async (error: unknown) => {
       process.stderr.write(`[weixin] ${formatError(error)}\n`);
     }) as any,
@@ -571,6 +648,44 @@ function parseWeixinClearContextArgs(args: string[]): WeixinClearContextArgs {
       options.accountId = next;
       index += 1;
     }
+  }
+  return options;
+}
+
+function parseWeixinWorkflowNotifyArgs(args: string[]): WeixinWorkflowNotifyArgs {
+  const options: WeixinWorkflowNotifyArgs = {
+    stateDir: null,
+    externalScopeId: null,
+    bridgeSessionId: null,
+    runId: null,
+    title: null,
+    status: 'succeeded',
+    detail: null,
+  };
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    const next = args[index + 1];
+    if (!next) {
+      continue;
+    }
+    if (arg === '--state-dir') {
+      options.stateDir = next;
+    } else if (arg === '--to') {
+      options.externalScopeId = next;
+    } else if (arg === '--bridge-session') {
+      options.bridgeSessionId = next;
+    } else if (arg === '--run-id') {
+      options.runId = next;
+    } else if (arg === '--title') {
+      options.title = next;
+    } else if (arg === '--status' && (next === 'succeeded' || next === 'failed')) {
+      options.status = next;
+    } else if (arg === '--detail') {
+      options.detail = next;
+    } else {
+      continue;
+    }
+    index += 1;
   }
   return options;
 }
@@ -948,6 +1063,7 @@ function printUsage() {
     createI18n().t('cli.usage.title'),
     createI18n().t('cli.usage.login'),
     createI18n().t('cli.usage.clearContext'),
+    '  weixin workflow-notify --run-id <id> [--status succeeded|failed] [--detail <reason>] [--title <title>] [--to <scope>] [--bridge-session <id>] [--state-dir <dir>]',
     createI18n().t('cli.usage.serve'),
     createI18n().t('cli.usage.cleanupInternalThreads'),
     createI18n().t('cli.usage.nativeApiServe'),
@@ -1112,6 +1228,7 @@ export {
   parseCodexNativeApiServeArgs,
   resolveEmbeddedCodexNativeApiOptions,
   parseWeixinClearContextArgs,
+  parseWeixinWorkflowNotifyArgs,
   parseWeixinLoginArgs,
   parseWeixinServeArgs,
   readPendingRestartNotifications,

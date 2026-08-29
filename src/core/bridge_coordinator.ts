@@ -1137,7 +1137,7 @@ export class BridgeCoordinator {
 
   async handleConversationTurn(event, options = {}) {
     const scopeRef = toScopeRef(event);
-    const providerProfile = this.resolveScopeProviderProfile(scopeRef);
+    const providerProfile = this.resolveProviderProfileForEvent(scopeRef, event);
     const targetedEvent = await this.rewriteConversationEventForExplicitPluginTarget(event, providerProfile);
     debugCoordinator('conversation_turn_begin', {
       platform: scopeRef.platform,
@@ -9789,6 +9789,12 @@ export class BridgeCoordinator {
     return this.requireProviderProfile(providerProfileId);
   }
 
+  resolveProviderProfileForEvent(scopeRef, event) {
+    const current = this.resolveSessionForEvent(scopeRef, event);
+    const providerProfileId = current?.providerProfileId ?? this.resolveDefaultProviderProfileId();
+    return this.requireProviderProfile(providerProfileId);
+  }
+
   resolveSessionForEvent(scopeRef, event) {
     const overrideSessionId = resolveOverrideBridgeSessionId(event);
     if (overrideSessionId) {
@@ -11335,7 +11341,10 @@ export class BridgeCoordinator {
     });
     const pendingArtifactDelivery = createPendingTurnArtifactDeliveryState(turnArtifactContext);
     ensureTurnArtifactDirectories(turnArtifactContext);
-    const turnEvent = withTurnArtifactContext(event, turnArtifactContext);
+    const turnEvent = withWorkflowNotificationContext(
+      withTurnArtifactContext(event, turnArtifactContext),
+      session.id,
+    );
     this.activeTurns?.updateScopeTurn(scopeRef, {
       bridgeSessionId: session.id,
       providerProfileId: session.providerProfileId,
@@ -16573,6 +16582,18 @@ function withTurnArtifactContext(event: InboundTextEvent, turnArtifactContext) {
   }
   return withCodexbridgeMetadata(event, {
     turnArtifactContext,
+  });
+}
+
+function withWorkflowNotificationContext(event: InboundTextEvent, bridgeSessionId: string): InboundTextEvent {
+  if (event.platform !== 'weixin' || !event.externalScopeId || !bridgeSessionId) {
+    return event;
+  }
+  return withCodexbridgeMetadata(event, {
+    workflowNotificationContext: {
+      externalScopeId: event.externalScopeId,
+      bridgeSessionId,
+    },
   });
 }
 

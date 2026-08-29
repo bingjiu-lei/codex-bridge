@@ -57,3 +57,31 @@ test('officialQrLogin follows confirmed QR flow and persists credentials', async
   assert.equal(accountStore.loadAccount('bot-account')?.token, 'bot-token');
   assert.equal(accountStore.getContextToken('bot-account', 'wxid_sender'), null);
 });
+
+test('officialQrLogin retries a transient HTTPS timeout while polling QR status', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codexbridge-weixin-login-'));
+  const accountStore = new WeixinAccountStore({ rootDir: tmpDir });
+  const timeoutError = Object.assign(new Error('HTTPS request timed out'), { code: 'ETIMEDOUT' });
+  const fetchImpl = createFetchMock([
+    { body: { qrcode: 'qr-1', qrcode_img_content: 'https://qr.example.com' } },
+    { error: timeoutError },
+    {
+      body: {
+        status: 'confirmed',
+        ilink_bot_id: 'bot-account',
+        bot_token: 'bot-token',
+        baseurl: 'https://ilink.example.com',
+        ilink_user_id: 'wx-user',
+      },
+    },
+  ]);
+
+  const credentials = await officialQrLogin({
+    accountStore,
+    fetchImpl,
+    timeoutSeconds: 1,
+    sleep: async () => {},
+  });
+
+  assert.equal(credentials?.account_id, 'bot-account');
+});

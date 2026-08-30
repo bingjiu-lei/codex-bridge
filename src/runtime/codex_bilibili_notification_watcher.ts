@@ -159,9 +159,6 @@ export class CodexBilibiliNotificationWatcher {
       && route.runId === event.runId
       && route.status === event.status
     ));
-    if (existingRoute) {
-      return;
-    }
     const sessionMeta = readSessionMeta(filePath);
     let session = this.bridgeSessions.list().find((candidate) => candidate.codexThreadId === event.threadId) ?? null;
     if (!session) {
@@ -176,7 +173,7 @@ export class CodexBilibiliNotificationWatcher {
         updatedAt: now,
       });
     }
-    const route = this.routeStore.register({
+    const route = existingRoute ?? this.routeStore.register({
       externalScopeId,
       bridgeSessionId: session.id,
       runId: event.runId,
@@ -191,10 +188,18 @@ export class CodexBilibiliNotificationWatcher {
       '引用回复此通知，会回到对应的 Codex 工作流对话。',
       formatWorkflowRouteMarker(route.alias),
     ].join('\n');
-    const result = await this.platformPlugin.sendText({ externalScopeId, content });
-    if (!result?.success) {
-      this.routeStore.remove(route.token);
+    try {
+      const result = await this.platformPlugin.sendText({ externalScopeId, content });
+      if (result?.success) {
+        return;
+      }
       throw new Error(result?.error || 'Automatic Bilibili terminal notification was not delivered.');
+    } catch (error) {
+      // A route is only valid after WeChat acknowledges the message. Keeping an
+      // orphan route would make the next scan mistake an earlier send failure
+      // for a completed delivery and permanently suppress the notification.
+      this.routeStore.remove(route.token);
+      throw error;
     }
   }
 }

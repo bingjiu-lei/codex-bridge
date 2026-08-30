@@ -833,16 +833,16 @@ function buildWorkflowNotificationDeveloperInstructions(event: InboundTextEvent)
     'weixin workflow-notify',
     `--to "${escapePowerShellArgument(context.externalScopeId)}"`,
     `--bridge-session "${escapePowerShellArgument(context.bridgeSessionId)}"`,
-    '--run-id "<bili_upload_status 的 job id>"',
+    '--run-id "<上传 job id；若创建任务前失败则使用本次任务唯一 id>"',
     '--title "<最终投稿标题>"',
     '--status "<succeeded 或 failed>"',
     '--detail "<失败时填写状态返回的简要原因；成功时省略>"',
   ].join(' ');
   return [
     'Bilibili terminal notification:',
-    '- Only when this turn actually runs the Bilibili publishing workflow and bili_upload_status explicitly reports status: succeeded or status: failed, execute the following PowerShell command once. Use the returned upload job id, final title, terminal status, and failure reason when present.',
+    '- When this turn actually runs the Bilibili publishing workflow, execute the following PowerShell command exactly once for every conclusive success or failure. This includes a failure before an upload job is created (for example, a local FileNotFoundError). Use the returned upload job id when one exists; otherwise provide a unique run id for this failed attempt. Use the final title, terminal status, and failure reason when present.',
     `- ${command}`,
-    '- Do not send this notification for active, timed-out, ambiguous, or cancelled uploads. Do not place this operational instruction in the user-facing response.',
+    '- Do not send this notification for an active, timed-out, ambiguous, or user-cancelled upload. Do not place this operational instruction in the user-facing response.',
   ].join('\n');
 }
 

@@ -111,6 +111,16 @@ export class FileJsonWorkflowNotificationRouteStore {
       && route.expiresAt > now
     )) ?? null;
   }
+
+  remove(token: string): boolean {
+    const records = this.list();
+    const next = records.filter((route) => route.token !== token);
+    if (next.length === records.length) {
+      return false;
+    }
+    this.store.write(next);
+    return true;
+  }
 }
 
 interface WorkflowFocus {

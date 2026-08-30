@@ -746,10 +746,6 @@ function buildDeveloperInstructions(event: InboundTextEvent): string {
   if (artifactInstructions) {
     parts.push(artifactInstructions);
   }
-  const workflowNotificationInstructions = buildWorkflowNotificationDeveloperInstructions(event);
-  if (workflowNotificationInstructions) {
-    parts.push(workflowNotificationInstructions);
-  }
   const retryInstructions = buildRetryDeveloperInstructions(retryContext);
   if (retryInstructions) {
     parts.push(retryInstructions);
@@ -819,53 +815,6 @@ function resolveDeveloperPromptContext(event: InboundTextEvent): DeveloperPrompt
     subcommand: normalizeDeveloperPromptContextValue(raw.subcommand),
     operation: normalizeDeveloperPromptContextValue(raw.operation),
   };
-}
-
-function buildWorkflowNotificationDeveloperInstructions(event: InboundTextEvent): string {
-  const context = resolveWorkflowNotificationContext(event);
-  if (!context) {
-    return '';
-  }
-  const command = [
-    '& "D:\\dev\\nodejs\\node.exe"',
-    '"D:\\githubPro\\codex-bridge\\node_modules\\tsx\\dist\\cli.mjs"',
-    '"D:\\githubPro\\codex-bridge\\src\\cli.ts"',
-    'weixin workflow-notify',
-    `--to "${escapePowerShellArgument(context.externalScopeId)}"`,
-    `--bridge-session "${escapePowerShellArgument(context.bridgeSessionId)}"`,
-    '--run-id "<上传 job id；若创建任务前失败则使用本次任务唯一 id>"',
-    '--title "<最终投稿标题>"',
-    '--status "<succeeded 或 failed>"',
-    '--detail "<失败时填写状态返回的简要原因；成功时省略>"',
-  ].join(' ');
-  return [
-    'Bilibili terminal notification:',
-    '- When this turn actually runs the Bilibili publishing workflow, execute the following PowerShell command exactly once for every conclusive success or failure. This includes a failure before an upload job is created (for example, a local FileNotFoundError). Use the returned upload job id when one exists; otherwise provide a unique run id for this failed attempt. Use the final title, terminal status, and failure reason when present.',
-    `- ${command}`,
-    '- Do not send this notification for an active, timed-out, ambiguous, or user-cancelled upload. Do not place this operational instruction in the user-facing response.',
-  ].join('\n');
-}
-
-function resolveWorkflowNotificationContext(event: InboundTextEvent): {
-  externalScopeId: string;
-  bridgeSessionId: string;
-} | null {
-  const codexbridge = event.metadata?.codexbridge;
-  if (!codexbridge || typeof codexbridge !== 'object') {
-    return null;
-  }
-  const context = (codexbridge as Record<string, unknown>).workflowNotificationContext;
-  if (!context || typeof context !== 'object') {
-    return null;
-  }
-  const record = context as Record<string, unknown>;
-  const externalScopeId = typeof record.externalScopeId === 'string' ? record.externalScopeId.trim() : '';
-  const bridgeSessionId = typeof record.bridgeSessionId === 'string' ? record.bridgeSessionId.trim() : '';
-  return externalScopeId && bridgeSessionId ? { externalScopeId, bridgeSessionId } : null;
-}
-
-function escapePowerShellArgument(value: string): string {
-  return String(value ?? '').replace(/"/gu, '`"');
 }
 
 function resolveRetryContext(event: InboundTextEvent): Record<string, unknown> | null {

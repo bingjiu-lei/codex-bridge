@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
+import os from 'node:os';
 import { spawn, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +25,7 @@ import {
   formatWorkflowRouteMarker,
   WeixinWorkflowRouteResolver,
 } from './runtime/weixin_workflow_routes.js';
+import { CodexBilibiliNotificationWatcher } from './runtime/codex_bilibili_notification_watcher.js';
 import { createI18n } from './i18n/index.js';
 
 const CLI_FILE = fileURLToPath(import.meta.url);
@@ -304,6 +306,7 @@ async function runWeixinServe(args: string[]) {
     },
   });
   const platformPlugin = runtime.registry.getPlatform('weixin') as WeixinPlatformPlugin;
+  const workflowRouteStore = new FileJsonWorkflowNotificationRouteStore(path.join(stateDir, 'runtime', 'workflow_notification_routes.json'));
   const bridgeRuntime = new WeixinBridgeRuntime({
     platformPlugin,
     bridgeCoordinator: runtime.services.bridgeCoordinator,
@@ -311,7 +314,7 @@ async function runWeixinServe(args: string[]) {
     agentJobs: runtime.services.agentJobs,
     assistantRecords: runtime.services.assistantRecords,
     workflowRouteResolver: new WeixinWorkflowRouteResolver({
-      routeStore: new FileJsonWorkflowNotificationRouteStore(path.join(stateDir, 'runtime', 'workflow_notification_routes.json')),
+      routeStore: workflowRouteStore,
       focusStore: new FileJsonWorkflowFocusStore(path.join(stateDir, 'runtime', 'workflow_notification_focus.json')),
     }),
     onError: (async (error: unknown) => {
@@ -319,6 +322,17 @@ async function runWeixinServe(args: string[]) {
     }) as any,
     locale: i18n.locale,
   } as any);
+  const workflowWatcher = new CodexBilibiliNotificationWatcher({
+    stateFile: path.join(stateDir, 'runtime', 'codex_bilibili_notification_watcher.json'),
+    routeStore: workflowRouteStore,
+    bridgeSessions: repositories.bridgeSessions,
+    platformBindings: repositories.platformBindings,
+    platformPlugin,
+    providerProfileId: runtime.config.defaultProviderProfileId,
+    sessionsDir: path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'sessions'),
+    defaultCwd: runtime.config.defaultCwd,
+    onError: (error) => process.stderr.write(`[bilibili-watcher] ${formatError(error)}\n`),
+  });
   const embeddedNativeApiOptions = resolveEmbeddedCodexNativeApiOptions({
     env: process.env,
     defaultProviderProfileId: runtime.config.defaultProviderProfileId,
@@ -359,6 +373,7 @@ async function runWeixinServe(args: string[]) {
     stopped = true;
     process.stdout.write(`${i18n.t('cli.serve.stopping', { signal })}\n`);
     try {
+      workflowWatcher.stop();
       await bridgeRuntime.stop();
       await nativeApi?.stop().catch(() => {});
     } finally {
@@ -383,8 +398,10 @@ async function runWeixinServe(args: string[]) {
       process.stdout.write(`native_api_provider_kind: ${binding.providerKind}\n`);
       process.stdout.write(`native_api_auth_mode: ${embeddedNativeApiOptions.authToken ? i18n.t('common.enabled') : i18n.t('common.disabled')}\n`);
     }
+    workflowWatcher.start();
     await bridgeRuntime.start();
   } finally {
+    workflowWatcher.stop();
     await nativeApi?.stop().catch(() => {});
     await stopRuntimeProviderPlugins(runtime.registry.listProviders());
     await serveLock.release();
